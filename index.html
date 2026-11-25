@@ -1,0 +1,367 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Mutual Connect TEST</title>
+  <meta name="theme-color" content="#e67e22">
+  <link rel="manifest" href="manifest.json">
+  <link rel="icon" href="icon-192.png?v=2">
+  <!-- iOS -->
+  <link rel="apple-touch-icon" href="icon-192.png?v=2">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Mutual TEST">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <style>
+    :root { --bg:#faf8f3; --primary:#b8a57a; --text:#3a3a3a; }
+    html, body { margin:0; height:100%; background:var(--bg); overflow:hidden; }
+    iframe { position:fixed; inset:0; width:100%; height:100%; border:0; opacity:0; transition:opacity 1.4s ease .2s; }
+    iframe.ready { opacity:1; }
+
+    /* ===== Écran de démarrage : assemblage + respiration + portail ===== */
+    #splash { position:fixed; inset:0; z-index:20; display:flex; align-items:center; justify-content:center; overflow:hidden; }
+    #splash .hole { position:absolute; left:50%; top:50%; width:0; height:0; border-radius:50%;
+                    transform:translate(-50%,-50%); box-shadow:0 0 120px 300vmax var(--bg); }
+    #splash .halo { position:absolute; left:50%; top:50%; width:min(58vw,300px); aspect-ratio:1; border-radius:50%;
+                    border:3px solid var(--primary); opacity:0; transform:translate(-50%,-50%) scale(.8); }
+    #splash .logo-wrap { position:relative; width:min(46vw,240px); display:flex; }
+    #splash svg { width:100%; overflow:visible; }
+    #splash .logo { transform-box:fill-box; transform-origin:50% 50%; }
+    #splash .p { transform-box:fill-box; transform-origin:center; }
+    #splash .p1 { --dx:-60px; --dy:-40px; --d:0s; }
+    #splash .p2 { --dx:40px;  --dy:60px;  --d:.14s; }
+    #splash .p3 { --dx:-50px; --dy:20px;  --d:.28s; }
+    #splash .p4 { --dx:60px;  --dy:-50px; --d:.42s; }
+    #splash .p5 { --dx:50px;  --dy:70px;  --d:.56s; }
+
+    #splash.play .p    { animation: build 1.1s cubic-bezier(.2,.9,.25,1.05) var(--d) both; }
+    #splash.play .logo { animation: breathe 2.8s ease-in-out 1.7s infinite; }
+    #splash.play .halo { animation: halo 2.8s ease-out 1.7s infinite; }
+
+    #splash.exit { pointer-events:none; animation: fadeOut .8s ease 1.2s forwards; }
+    #splash.exit .halo { opacity:0; transition:opacity .6s; }
+    #splash.exit .p    { animation: burst 1.3s cubic-bezier(.55,0,.35,1) forwards; }
+    #splash.exit .logo { animation: plunge 1.3s cubic-bezier(.55,0,.35,1) forwards; }
+    #splash.exit .hole { animation: open 1.8s cubic-bezier(.45,0,.25,1) .2s forwards; }
+
+    @keyframes build   { from { opacity:0; transform:translate(var(--dx),var(--dy)) scale(.6); } to { opacity:1; transform:none; } }
+    @keyframes breathe { 0%,100% { transform:scale(1); } 50% { transform:scale(1.07); } }
+    @keyframes halo    { 0% { opacity:.55; transform:translate(-50%,-50%) scale(.8); } 100% { opacity:0; transform:translate(-50%,-50%) scale(1.5); } }
+    @keyframes burst   { to { transform:translate(calc(var(--dx) * -3), calc(var(--dy) * -3)); } }
+    @keyframes plunge  { to { transform:scale(4.5); opacity:0; } }
+    @keyframes fadeOut { to { opacity:0; } }
+    @keyframes open    { to { width:300vmax; height:300vmax; } }
+
+    /* Accessibilité : animations réduites si demandé par l'appareil */
+    @media (prefers-reduced-motion: reduce) {
+      #splash.play .p, #splash.play .logo, #splash.play .halo { animation:none; }
+      #splash.exit { transition:opacity .3s; opacity:0; }
+      #splash.exit .p, #splash.exit .logo, #splash.exit .hole { animation:none; }
+    }
+
+    /* ===== Hors connexion ===== */
+    #offline { display:none; position:fixed; inset:0; z-index:30; background:var(--bg); color:var(--text);
+               font:600 20px system-ui, sans-serif; align-items:center; justify-content:center;
+               flex-direction:column; gap:20px; text-align:center; padding:24px; }
+    /* ===== Demande d'autorisation des notifications ===== */
+    #pushAsk { display:none; position:fixed; inset:0; z-index:40; background:rgba(40,32,20,.55); align-items:center; justify-content:center; padding:20px; }
+    #pushAsk .box { background:#fff; border-radius:16px; padding:24px 22px; max-width:380px; width:100%; text-align:center;
+                    font:500 16px/1.45 system-ui, sans-serif; color:var(--text); box-shadow:0 10px 40px rgba(0,0,0,.25); }
+    #pushAsk .ico { font-size:40px; }
+    #pushAsk h2 { font-size:20px; margin:8px 0 6px; }
+    #pushAsk button { display:block; width:100%; min-height:52px; margin-top:12px; border:0; border-radius:12px; font:700 17px system-ui, sans-serif; }
+    #pushAsk .ok { background:var(--primary); color:#fff; }
+    #pushAsk .no { background:#f0ebe0; color:var(--text); }
+
+    #offline button { min-height:56px; padding:0 32px; border:0; border-radius:12px;
+                      background:var(--primary); color:#fff; font:600 18px system-ui, sans-serif; }
+    /* Scan de code-barres : caméra ouverte par la page installée (l'iframe Apps Script n'y a pas accès) */
+    #scanCam { display:none; position:fixed; inset:0; z-index:50; background:rgba(20,16,10,.94); flex-direction:column; align-items:center; justify-content:center; gap:16px; padding:18px; }
+    #scanCam .cadre { position:relative; width:min(94vw,760px); aspect-ratio:4/3; border-radius:16px; overflow:hidden; background:#000; }
+    #scanCam video { width:100%; height:100%; object-fit:cover; }
+    #scanCam .viseur { position:absolute; left:7%; right:7%; top:36%; bottom:36%; border:3px solid var(--primary); border-radius:10px; box-shadow:0 0 0 2000px rgba(0,0,0,.28); }
+    #scanCam p { color:#fff; font:700 17px system-ui, sans-serif; margin:0; text-align:center; }
+    #scanCam .info { color:#e9dcc0; font:500 14px system-ui, sans-serif; min-height:18px; }
+    #scanCam button { min-height:54px; padding:0 34px; border-radius:12px; border:0; background:#f0ebe0; color:var(--text); font:800 17px system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <!-- ENVIRONNEMENT DE TEST : bandeau toujours visible -->
+  <div id="bandeau-test" style="position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#e67e22;color:#fff;font:600 12px/18px system-ui,sans-serif;text-align:center;pointer-events:none;letter-spacing:.05em">ENVIRONNEMENT DE TEST · données fictives</div>
+
+  <!-- ⚠️ Remplacer par l'URL /exec de production (jamais /dev) -->
+  <iframe id="app"
+    data-src="https://script.google.com/macros/s/URL_EXEC_DE_TEST/exec"
+    allow="camera; microphone; clipboard-read; clipboard-write; fullscreen"
+    title="Mutual Connect"></iframe>
+  <script>
+    // Chargement immédiat de l'appli (sans attendre Firebase)
+    // ?pwa=1 → pas de bandeau « installer » ; ?demo=1 → version démo
+    const frame = document.getElementById('app');
+    const isDemo = new URLSearchParams(location.search).get('demo') === '1';
+    frame.src = frame.dataset.src + '?pwa=1' + (isDemo ? '&demo=1' : '');
+  </script>
+
+  <div id="splash" class="play" aria-hidden="true">
+    <div class="hole"></div>
+    <div class="halo"></div>
+    <div class="logo-wrap">
+      <svg viewBox="0 0 234 189"><g class="logo"><g transform="translate(-54,-69)">
+        <polygon class="p p1" fill="#bdac7d" points="54,69.5 54,177.8 166.2,243.8 166.2,213 85,165 85,83.2"/>
+        <polygon class="p p2" fill="#988761" points="166.2,243.8 228.8,208.5 228.8,178 166.2,213"/>
+        <polygon class="p p3" fill="#bdac7d" points="168.8,153 114,122.5 114,152.5 168.8,183.8"/>
+        <polygon class="p p4" fill="#988761" points="168.8,153 168.8,183.8 287.8,114.8 287.8,83.5"/>
+        <polygon class="p p5" fill="#988761" points="287.8,143 257,160.2 257,257.8 287.8,244.5"/>
+      </g></g></svg>
+    </div>
+  </div>
+
+  <div id="offline">
+    <div>Pas de connexion internet</div>
+    <button onclick="location.reload()">Réessayer</button>
+  </div>
+
+  <div id="scanCam" role="dialog" aria-modal="true" aria-label="Scanner un code-barres">
+    <div class="cadre"><video id="scanVideo" playsinline muted autoplay></video><div class="viseur"></div></div>
+    <p>Visez le code-barres de l'étiquette : il est lu tout seul.</p>
+    <div class="info" id="scanInfo"></div>
+    <button type="button" onclick="scanFermer(true)">Annuler</button>
+  </div>
+  <div id="pushAsk" role="dialog" aria-modal="true" aria-labelledby="pushAskTitre">
+    <div class="box">
+      <div class="ico">🔔</div>
+      <h2 id="pushAskTitre">Activer les notifications</h2>
+      <div>Mutual Connect pourra vous prévenir des nouvelles remontées, même appli fermée.</div>
+      <button class="ok" onclick="pushAutoriser()">Autoriser</button>
+      <button class="no" onclick="pushPlusTard()">Plus tard</button>
+    </div>
+  </div>
+
+  <!-- Firebase (notifications push) -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-messaging-compat.js"></script>
+  <script src="firebase-config.js"></script>
+
+  <script>
+    // --- Écran de démarrage : sortie quand l'appli est chargée (min 2,6 s, max 10 s) ---
+    const splash = document.getElementById('splash');
+    const start = Date.now();
+    let done = false;
+    function enterApp() {
+      if (done) return;
+      done = true;
+      const wait = Math.max(0, 2600 - (Date.now() - start));
+      setTimeout(() => {
+        splash.classList.remove('play');
+        splash.classList.add('exit');
+        frame.classList.add('ready');
+        setTimeout(() => splash.remove(), 2200);
+      }, wait);
+    }
+    frame.addEventListener('load', enterApp);
+    setTimeout(enterApp, 10000);
+
+    // --- Hors connexion ---
+    const off = document.getElementById('offline');
+    const show = () => off.style.display = navigator.onLine ? 'none' : 'flex';
+    addEventListener('online', () => { if (off.style.display === 'flex') location.reload(); });
+    addEventListener('offline', show);
+    show();
+
+    const swReg = 'serviceWorker' in navigator ? navigator.serviceWorker.register('sw.js') : null;
+
+    // Appli ouverte / remise au premier plan → efface les notifications et la pastille de l'icône
+    function effacerPastille() {
+      if (document.hidden) return;
+      try { if (navigator.clearAppBadge) navigator.clearAppBadge().catch(() => {}); } catch (e) {}
+      if (swReg) swReg.then(r => r.getNotifications()).then(l => l.forEach(n => n.close())).catch(() => {});
+    }
+    effacerPastille();
+    document.addEventListener('visibilitychange', effacerPastille);
+
+    // Appli restée en arrière-plan > 20 min : Android/iOS a pu geler l'appli → rechargement propre
+    let cacheeDepuis = 0;
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { cacheeDepuis = Date.now(); return; }
+      if (cacheeDepuis && Date.now() - cacheeDepuis > 20 * 60 * 1000) location.reload();
+    });
+    addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+
+    // ===== NOTIFICATIONS PUSH (Firebase Cloud Messaging) =====
+    // L'appli (iframe Apps Script) dialogue avec cette page par postMessage :
+    //   appli → { mc:'push', action:'etat' | 'activer' }
+    //   page  → { mc:'push', etat:'granted'|'default'|'denied'|'non-supporte', token, ios }
+    const cfg = window.MC_FIREBASE || {};
+    const pushConfigure = !!(cfg.config && cfg.config.apiKey && cfg.vapidKey && window.firebase);
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    const pushSupporte = pushConfigure && !!swReg && 'PushManager' in window && 'Notification' in window;
+    let appWin = null, appOrigin = null, messaging = null;
+
+    const origineAppli = o => { try { const h = new URL(o).hostname; return h.endsWith('.googleusercontent.com') || h === 'script.google.com'; } catch (e) { return false; } };
+    const envoyerAppli = msg => { if (appWin) appWin.postMessage(Object.assign({ mc: 'push' }, msg), appOrigin); };
+
+    function getMessaging() {
+      if (messaging) return messaging;
+      firebase.initializeApp(cfg.config);
+      messaging = firebase.messaging();
+      // Appli ouverte au premier plan : on affiche quand même la notification
+      messaging.onMessage(p => {
+        const n = p.notification || p.data || {};
+        swReg.then(r => r.showNotification(n.title || 'Mutual Connect', { body: n.body || '', icon: 'icon-192.png', badge: 'icon-192.png', data: { url: r.scope } }));
+      });
+      return messaging;
+    }
+
+    async function pushEtat() {
+      if (!pushSupporte) return envoyerAppli({ etat: 'non-supporte', ios: isIOS });
+      let token = null;
+      if (Notification.permission === 'granted') {
+        // iOS : le service worker doit être actif, et le 1er appel échoue parfois → 2e essai
+        const demander = async () => getMessaging().getToken({ vapidKey: cfg.vapidKey, serviceWorkerRegistration: await navigator.serviceWorker.ready });
+        try { token = await demander(); }
+        catch (e1) {
+          console.warn('Jeton push (1er essai) :', e1);
+          await new Promise(r => setTimeout(r, 1500));
+          try { token = await demander(); }
+          catch (e) { console.warn('Jeton push :', e); pushErreur(e); }
+        }
+      }
+      // Jeton changé (mise à jour, renouvellement Firebase) → l'appli recopie les préférences
+      let ancien = null;
+      try { ancien = localStorage.getItem('mc_test_push_token'); if (token) localStorage.setItem('mc_test_push_token', token); } catch (e) {}
+      envoyerAppli({ etat: Notification.permission, token,
+                     ancienToken: (token && ancien && ancien !== token) ? ancien : null });
+    }
+
+    const pushAsk = document.getElementById('pushAsk');
+    function pushAutoriser() {
+      pushAsk.style.display = 'none';
+      Notification.requestPermission().then(p => {
+        console.info('[push] réponse autorisation :', p);
+        if (p !== 'granted') pushAide(p);
+        pushEtat();
+      }, pushEtat);
+    }
+
+    // Autorisation refusée ou demande masquée par le navigateur → explication à l'écran
+    function pushAide(perm) {
+      const box = pushAsk.querySelector('.box');
+      box.innerHTML = '<div class="ico">🔕</div><h2>Notifications non autorisées</h2>'
+        + '<div style="font-size:14.5px;text-align:left">'
+        + (perm === 'denied'
+            ? 'Les notifications sont <b>bloquées</b> pour Mutual Connect.'
+            : 'Le navigateur n\'a pas affiché la demande d\'autorisation.')
+        + '<br><br><b>Pour les autoriser :</b><ol style="padding-left:20px;margin:6px 0">'
+        + '<li>Menu <b>⋯</b> de la fenêtre de l\'appli → <b>Informations sur l\'application</b> / <b>Paramètres de l\'application</b> (ou <b>Autorisations</b>)</li>'
+        + '<li><b>Notifications</b> → <b>Autoriser</b></li>'
+        + '<li>Fermer puis rouvrir l\'appli, puis 🔔 → Enregistrer</li></ol>'
+        + 'Sous Windows, vérifier aussi <b>Paramètres → Système → Notifications</b> : le navigateur doit être autorisé.</div>'
+        + '<button class="no" onclick="location.reload()">Fermer</button>';
+      pushAsk.style.display = 'flex';
+    }
+    // Affiche l'erreur à l'écran (diagnostic) si le jeton n'a pas pu être obtenu
+    function pushErreur(e) {
+      const box = pushAsk.querySelector('.box');
+      box.innerHTML = '<div class="ico">⚠️</div><h2>Notifications indisponibles</h2>'
+        + '<div style="font-size:14px;word-break:break-word">' + String((e && (e.code || '')) + ' ' + (e && e.message || e)).replace(/</g, '&lt;') + '</div>'
+        + '<button class="no" onclick="location.reload()">Fermer</button>';
+      pushAsk.style.display = 'flex';
+    }
+    function pushPlusTard() { pushAsk.style.display = 'none'; pushEtat(); }
+
+    // ===== SCAN DE CODE-BARRES =====
+    // La caméra est ouverte ici (page installée) car l'iframe Apps Script n'y a pas accès.
+    //   appli → { mc:'scan', action:'ouvrir', motif }   (motif : expression du code attendu)
+    //   page  → { mc:'scan', etat:'ouvert' } puis { mc:'scan', code } | { mc:'scan', annule:true } | { mc:'scan', erreur }
+    const ZXING_URL = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js';
+    let scanWin = null, scanOrigin = null, scanFlux = null, scanMinut = null, scanTour = 0, scanMotif = null, zxingP = null, zxLecteur = null;
+    const scanEnvoyer = msg => { if (scanWin) scanWin.postMessage(Object.assign({ mc: 'scan' }, msg), scanOrigin); };
+    function chargerZxing() {
+      if (window.ZXing) return Promise.resolve();
+      if (!zxingP) zxingP = new Promise((ok, ko) => {
+        const sc = document.createElement('script'); sc.src = ZXING_URL; sc.onload = ok;
+        sc.onerror = () => { zxingP = null; ko(new Error('lecteur non chargé')); };
+        document.head.appendChild(sc);
+      });
+      return zxingP;
+    }
+    function zxDecoder(video, tourne) {
+      if (!zxLecteur) {
+        zxLecteur = new ZXing.MultiFormatReader();
+        const o = new Map(); o.set(ZXing.DecodeHintType.TRY_HARDER, true); zxLecteur.setHints(o);
+      }
+      const r = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+      const w = Math.round(video.videoWidth * r), h = Math.round(video.videoHeight * r);
+      const t = document.createElement('canvas');
+      t.width = tourne ? h : w; t.height = tourne ? w : h;
+      const c = t.getContext('2d');
+      if (tourne) { c.translate(h, 0); c.rotate(Math.PI / 2); }
+      c.drawImage(video, 0, 0, w, h);
+      try { return zxLecteur.decode(new ZXing.BinaryBitmap(new ZXing.HybridBinarizer(new ZXing.HTMLCanvasElementLuminanceSource(t)))).getText(); }
+      catch (e) { return null; }
+    }
+    function scanFermer(annule) {
+      clearTimeout(scanMinut);
+      if (scanFlux) scanFlux.getTracks().forEach(t => t.stop());
+      scanFlux = null;
+      document.getElementById('scanCam').style.display = 'none';
+      if (annule) scanEnvoyer({ annule: true });
+    }
+    async function scanOuvrir() {
+      if (scanFlux) return;
+      const info = document.getElementById('scanInfo');
+      info.textContent = '';
+      try {
+        scanFlux = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }, audio: false });
+      } catch (err) {
+        scanFlux = null;
+        return scanEnvoyer({ erreur: err && err.name === 'NotAllowedError' ? 'Accès à la caméra refusé : autorisez-le dans les réglages de Chrome.' : 'Caméra indisponible.' });
+      }
+      const video = document.getElementById('scanVideo');
+      video.srcObject = scanFlux;
+      document.getElementById('scanCam').style.display = 'flex';
+      scanEnvoyer({ etat: 'ouvert' });
+      try { await video.play(); } catch (e) {}
+      const detecteur = 'BarcodeDetector' in window ? new BarcodeDetector() : null;
+      try { await chargerZxing(); } catch (e) { if (!detecteur) { scanFermer(false); return scanEnvoyer({ erreur: 'Lecteur de code-barres non chargé (réseau ?).' }); } }
+      const analyser = async () => {
+        if (!scanFlux) return;
+        let codes = [];
+        try { if (detecteur) codes = (await detecteur.detect(video)).map(c => c.rawValue); } catch (e) {}
+        if (!codes.length && window.ZXing && video.videoWidth) { const t = zxDecoder(video, (scanTour++) % 2 === 1); if (t) codes = [t]; }
+        const bon = codes.find(c => !scanMotif || scanMotif.test(String(c).toUpperCase().replace(/[\s-]/g, '')));
+        if (bon) {
+          if (navigator.vibrate) navigator.vibrate(80);
+          scanFermer(false);
+          return scanEnvoyer({ code: String(bon) });
+        }
+        if (codes.length) info.textContent = 'Code lu mais pas une étiquette d\'emplacement : ' + codes[0];
+        scanMinut = setTimeout(analyser, 120);
+      };
+      analyser();
+    }
+    addEventListener('message', e => {
+      if (!e.data || e.data.mc !== 'scan' || !origineAppli(e.origin)) return;
+      scanWin = e.source; scanOrigin = e.origin;
+      if (e.data.action === 'ouvrir') {
+        try { scanMotif = e.data.motif ? new RegExp(e.data.motif) : null; } catch (err) { scanMotif = null; }
+        scanOuvrir();
+      }
+      if (e.data.action === 'fermer') scanFermer(false);
+    });
+    document.addEventListener('visibilitychange', () => { if (document.hidden && scanFlux) scanFermer(true); });
+
+    addEventListener('message', e => {
+      if (!e.data || e.data.mc !== 'push' || !origineAppli(e.origin)) return;
+      appWin = e.source; appOrigin = e.origin;
+      if (e.data.action === 'etat') pushEtat();
+      if (e.data.action === 'activer') {
+        console.info('[push] activer — supporté :', pushSupporte, '— permission :', window.Notification && Notification.permission);
+        if (pushSupporte && Notification.permission === 'denied') { pushAide('denied'); return pushEtat(); }
+        if (!pushSupporte || Notification.permission !== 'default') return pushEtat();
+        pushAsk.style.display = 'flex'; // la demande d'autorisation doit venir d'un appui sur cette page
+      }
+    });
+  </script>
+</body>
+</html>
