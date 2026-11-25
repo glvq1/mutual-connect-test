@@ -15,4 +15,6 @@ Environnement de test de Mutual Connect. Rien de ce qui est fait ici ne touche l
 
 ## Réglage
 
-L'URL `/exec` de la copie Apps Script de test est dans `index.html` (attribut `data-src` de l'iframe).
+`index.html` est **généré** depuis `test/app.html` du dépôt privé `mutual-connect-gas` (script `outils/construire_front.py test`). Ne pas le modifier à la main.
+
+Depuis l'étape 1 de la migration, l'appli n'est plus dans une iframe : la page appelle Apps Script directement (doPost, voir `Rpc.gs`).
