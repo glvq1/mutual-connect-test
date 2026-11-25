@@ -15,4 +15,4 @@ Environnement de test de Mutual Connect. Rien de ce qui est fait ici ne touche l
 
 ## Réglage
 
-Dans `index.html`, remplacer `URL_EXEC_DE_TEST` par l'identifiant de déploiement `/exec` de la copie Apps Script de test.
+L'URL `/exec` de la copie Apps Script de test est dans `index.html` (attribut `data-src` de l'iframe).
