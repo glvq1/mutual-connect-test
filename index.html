@@ -50,7 +50,7 @@ addEventListener('message', function (e) { if (window.mcsFile) window.mcsFile.pu
     },
     colis: { listerColisFragiles: 'cf_lister', enregistrerColisFragiles: 'cf_enregistrer' },
     // [ENTRETIEN] tâches des agents d'entretien : tout en direct (pas de version Apps Script)
-    entretien: { entTableau: 'ent_tableau', entSuivi: 'ent_suivi', entDebuter: 'ent_debuter', entTerminer: 'ent_terminer', entAnnuler: 'ent_annuler' }
+    entretien: { entTableau: 'ent_tableau', entSuivi: 'ent_suivi', entDebuter: 'ent_debuter', entTerminer: 'ent_terminer', entAnnuler: 'ent_annuler', entNonFait: 'ent_non_fait' }
   };
   var routeSb = {};
   if (SB && SB.url && SB.cle) {
@@ -3218,6 +3218,19 @@ html.mc-sombre .ga-extra input.ga-autre-t, html.mc-sombre .ga-extra input.ga-po-
 .ent-kpi b { font-size: 24px; color: var(--dark); }
 .ent-kpi.rouge b { color: #c0392b; }
 .ent-parag { margin: 0 0 12px; font-size: 14px; color: var(--text-muted); }
+.ent-sous-titre { margin: 12px 0 6px; padding-left: 4px; font-size: 14px; font-weight: 800; color: var(--text-muted); }
+.ent-btn.nonfait { min-height: 44px; font-size: 14px; background: #fff; border: 2px solid #c0392b; color: #c0392b; }
+.ent-row.s-non_fait { opacity: .75; box-shadow: inset 5px 0 0 #7f8c8d; }
+.ent-pill.s-non_fait { background: #eceff1; color: #546e7a; }
+.ent-justif { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.ent-justif label { font-weight: 700; font-size: 14px; }
+.ent-justif textarea { min-height: 80px; font-size: 16px; padding: 10px; border: 2px solid #c0392b; border-radius: 10px; font-family: inherit; }
+.ent-justif-err { color: #c0392b; font-size: 13px; font-weight: 700; min-height: 1em; }
+.ent-justif-act { display: flex; flex-wrap: wrap; gap: 8px; }
+.ent-btn.export { background: var(--secondary); color: #fff; min-height: 48px; font-size: 15px; }
+html.mc-sombre .ent-btn.nonfait { background: #26231f; color: #ff8a7a; border-color: #ff8a7a; }
+html.mc-sombre .ent-pill.s-non_fait { background: #2a2f33; color: #aab7c4; }
+html.mc-sombre .ent-justif textarea { background: #26231f; color: var(--dark); }
 @media (max-width: 560px) { .ent-row { flex-wrap: wrap; } .ent-act { flex-direction: row; width: 100%; } .ent-btn { flex: 1; } }
 html.mc-sombre .m-ent .db-mod-ico { background: #16301f; color: #7fd6a3; }
 html.mc-sombre .ent-onglet, html.mc-sombre .ent-agent, html.mc-sombre .ent-liste, html.mc-sombre .ent-titre button,
@@ -4350,6 +4363,7 @@ html.mc-sombre .ent-kpi.rouge b { color: #ff8a7a; }
                 <div class="ent-filtres" id="entSuiviAgents"></div>
                 <div class="ent-kpis" id="entSuiviKpis"></div>
                 <div class="ent-parag" id="entSuiviTemps"></div>
+                <div style="margin:0 0 12px"><button type="button" class="ent-btn export" onclick="entExporterExcel()">📊 Exporter la synthèse (Excel)</button></div>
                 <div class="ent-filtres" id="entSuiviStatuts"></div>
                 <div id="entSuiviListe"></div>
             </div>
@@ -7918,8 +7932,11 @@ gaMajBoutonPapier();
 // Chaque tâche a un agent « favori », mais chacun peut valider les tâches de l'autre.
 // Horodatage : « Début » puis « Fin ». Urgences = remontées « Chambre » non traitées (la fin les passe en « traitée »).
 const ENT_FREQ = { J2: '2 fois par jour', J1: 'Chaque jour', S2: '2 fois par semaine', S1: 'Chaque semaine', W3: 'Toutes les 3 semaines', M1: 'Chaque mois' };
-const ENT_STATUTS = { a_faire: 'À faire', en_cours: 'En cours', retard: 'En retard', fait: 'Fait', fait_retard: 'Fait en retard' };
-const ENT_RANG = { retard: 0, en_cours: 1, a_faire: 2, fait_retard: 3, fait: 3 };
+const ENT_STATUTS = { a_faire: 'À faire', en_cours: 'En cours', retard: 'En retard', fait: 'Fait', fait_retard: 'Fait en retard', non_fait: 'Non fait' };
+const ENT_RANG = { retard: 0, en_cours: 1, a_faire: 2, fait_retard: 3, fait: 3, non_fait: 3 };
+// Regroupement à l'écran et dans l'export : quotidien / hebdomadaire / mensuel (toutes les 3 semaines avec le mensuel)
+const ENT_GROUPES = [['quotidien', 'Quotidien', ['J2', 'J1']], ['hebdo', 'Hebdomadaire', ['S2', 'S1']], ['mensuel', 'Mensuel', ['W3', 'M1']]];
+function entGroupe_(f) { const g = ENT_GROUPES.find(x => x[2].indexOf(f) !== -1); return g ? g[1] : ''; }
 const ENT_CLE_AGENT = 'mc_ent_agent'; // agent choisi sur cet appareil (simple confort, l'identification viendra plus tard)
 const ENT_JOURS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
 let entVue = 'taches';
@@ -7930,6 +7947,8 @@ let entAgent = 0;
 try { entAgent = Number(localStorage.getItem(ENT_CLE_AGENT)) || 0; } catch (e) {}
 let entAutresOuvertes = false;
 let entSuiviPeriode = 'semaine', entSuiviAgent = 0, entSuiviStatut = 'tous';
+let entJustif = null;         // tâche dont la justification « non fait » est en cours de saisie : 'tache|occurrence'
+let entJustifBrouillon = '';
 
 function entOuvrir() { entChoisirVue(entVue); }
 
@@ -7993,6 +8012,10 @@ function entStatut_(t) {
 }
 function entExec_(t, agents) {
     if (t.debut && !t.fin) return '▶ Commencé à ' + entHeure_(t.debut) + ' par ' + dbEsc(entNomAgent_(t.fait_par, agents));
+    if (t.statut === 'non_fait') {
+        return '✗ Non fait' + (t.non_fait_le ? ' (' + entHeure_(t.non_fait_le) + ')' : '') + ' par ' + dbEsc(entNomAgent_(t.termine_par || t.fait_par, agents))
+            + ' · motif : ' + dbEsc(t.justification || '');
+    }
     if (t.fin) {
         const par = entNomAgent_(t.fait_par, agents), fin = t.termine_par && t.termine_par !== t.fait_par ? entNomAgent_(t.termine_par, agents) : '';
         return '✓ ' + entHeure_(t.debut) + ' → ' + entHeure_(t.fin) + ' · ' + entDuree_(t.duree_min) + ' · ' + dbEsc(par) + (fin ? ' (terminé par ' + dbEsc(fin) + ')' : '');
@@ -8001,10 +8024,23 @@ function entExec_(t, agents) {
 }
 function entBoutons_(t, statut) {
     const d = 'data-t="' + dbEsc(t.tache) + '" data-o="' + dbEsc(t.occurrence) + '"';
-    if (statut === 'en_cours') return '<button type="button" class="ent-btn fin" data-a="fin" ' + d + '>⏹ Fin</button>'
+    const urgence = String(t.tache).indexOf('rem:') === 0;
+    const nonFait = urgence ? '' : '<button type="button" class="ent-btn nonfait" data-a="nonfait" ' + d + '>✗ Non fait</button>';
+    if (statut === 'en_cours') return '<button type="button" class="ent-btn fin" data-a="fin" ' + d + '>⏹ Fin</button>' + nonFait
         + '<button type="button" class="ent-btn annuler" data-a="annuler" ' + d + '>Annuler</button>';
-    if (statut === 'a_faire' || statut === 'retard') return '<button type="button" class="ent-btn debut" data-a="debut" ' + d + '>▶ Début</button>';
+    if (statut === 'a_faire' || statut === 'retard') return '<button type="button" class="ent-btn debut" data-a="debut" ' + d + '>▶ Début</button>' + nonFait;
+    if (statut === 'non_fait') return '<button type="button" class="ent-btn annuler" data-a="annuler" ' + d + '>Annuler</button>';
     return '';
+}
+// Saisie de la justification « non fait », sous la ligne
+function entZoneJustif_(t) {
+    if (entJustif !== t.tache + '|' + t.occurrence) return '';
+    const d = 'data-t="' + dbEsc(t.tache) + '" data-o="' + dbEsc(t.occurrence) + '"';
+    return '<div class="ent-justif"><label>Pourquoi la tâche n\'est pas faite ? <span class="required">*</span></label>'
+        + '<textarea id="entJustifTexte" maxlength="500" placeholder="Ex. : zone inaccessible, matériel en panne…"></textarea>'
+        + '<div class="ent-justif-err" id="entJustifErr"></div>'
+        + '<div class="ent-justif-act"><button type="button" class="ent-btn fin" data-a="nonfait_ok" ' + d + '>Valider « non fait »</button>'
+        + '<button type="button" class="ent-btn annuler" data-a="nonfait_x" ' + d + '>Retour</button></div></div>';
 }
 function entLigne_(t, avecBoutons, agents) {
     const st = entStatut_(t);
@@ -8016,7 +8052,23 @@ function entLigne_(t, avecBoutons, agents) {
         + '<div class="ent-lib">' + dbEsc(t.libelle) + '</div>'
         + '<div class="ent-meta"><span class="ent-pill s-' + st + '">' + ENT_STATUTS[st] + '</span>' + prio + ' ' + meta.filter(Boolean).join(' · ') + '</div>'
         + (exec ? '<div class="ent-exec">' + exec + '</div>' : '')
+        + (avecBoutons ? entZoneJustif_(t) : '')
         + '</div>' + (avecBoutons ? '<div class="ent-act">' + entBoutons_(t, st) + '</div>' : '') + '</div>';
+}
+// Liste découpée en Quotidien / Hebdomadaire / Mensuel
+function entListeGroupee_(liste, avecBoutons, agents, prefixe) {
+    let h = '';
+    ENT_GROUPES.forEach(g => {
+        const l = liste.filter(t => g[2].indexOf(t.frequence) !== -1);
+        if (!l.length) return;
+        const reste = l.filter(t => ENT_RANG[entStatut_(t)] < 3).length;
+        h += '<div class="ent-sous-titre">' + g[1] + ' · ' + (avecBoutons ? reste + ' à faire' : l.length + ' tâche' + (l.length > 1 ? 's' : '')) + '</div>'
+            + '<div class="ent-liste">' + l.map(t => {
+                const ligne = entLigne_(t, avecBoutons, agents);
+                return prefixe ? ligne.replace('</div><div class="ent-meta">', '</div><div class="ent-meta">' + prefixe(t)) : ligne;
+            }).join('') + '</div>';
+    });
+    return h || '<div class="ent-liste"><div class="ent-vide">Aucune tâche.</div></div>';
 }
 function entLigneUrgence_(u) {
     const st = u.statut;
@@ -8041,7 +8093,7 @@ function entRendre_() {
     if (!r) return;
     document.getElementById('entAgents').innerHTML = (r.agents || []).map(a =>
         '<button type="button" class="ent-agent' + (a.num === entAgent ? ' on' : '') + '" data-agent="' + a.num + '">'
-        + '<b>' + dbEsc(a.nom) + '</b><small>' + dbEsc(a.secteur || '') + ' · fin de poste ' + dbEsc(a.fin_poste) + '</small></button>').join('');
+        + '<b>' + dbEsc(a.nom) + '</b></button>').join('');
     document.querySelectorAll('#entAgents .ent-agent').forEach(b => {
         b.onclick = () => { entAgent = Number(b.dataset.agent); try { localStorage.setItem(ENT_CLE_AGENT, String(entAgent)); } catch (e) {} entRendre_(); };
     });
@@ -8056,24 +8108,37 @@ function entRendre_() {
     const autres = entAgent ? taches.filter(t => t.agent !== entAgent) : [];
     const reste = l => l.filter(t => ENT_RANG[entStatut_(t)] < 3).length;
     h += '<div class="ent-titre">' + (entAgent ? 'Mes tâches' : 'Toutes les tâches') + ' · ' + reste(miennes) + ' à faire</div>';
-    h += '<div class="ent-liste">' + (miennes.length ? miennes.map(t => entLigne_(t, true)).join('') : '<div class="ent-vide">Aucune tâche ouverte.</div>') + '</div>';
+    h += entListeGroupee_(miennes, true);
     if (autres.length) {
         const nomAutre = Array.from(new Set(autres.map(t => entNomAgent_(t.agent)))).join(', ');
         h += '<div class="ent-titre">Tâches de ' + dbEsc(nomAutre) + ' · ' + reste(autres) + ' à faire'
             + '<button type="button" id="entBasculeAutres">' + (entAutresOuvertes ? 'Masquer' : 'Afficher') + '</button></div>';
-        if (entAutresOuvertes) h += '<div class="ent-liste">' + autres.map(t => entLigne_(t, true)).join('') + '</div>';
+        if (entAutresOuvertes) h += entListeGroupee_(autres, true);
     }
     const box = document.getElementById('entTaches');
     box.innerHTML = h;
     const bascule = document.getElementById('entBasculeAutres');
     if (bascule) bascule.onclick = () => { entAutresOuvertes = !entAutresOuvertes; entRendre_(); };
     box.querySelectorAll('[data-a]').forEach(b => { b.onclick = () => entAction_(b.dataset.a, b.dataset.t, b.dataset.o); });
+    const zone = document.getElementById('entJustifTexte');
+    if (zone) {
+        zone.value = entJustifBrouillon;
+        zone.oninput = () => { entJustifBrouillon = zone.value; document.getElementById('entJustifErr').textContent = ''; };
+        if (!entJustifBrouillon) zone.focus();
+    }
 }
 
 function entAction_(action, tache, occ) {
     if (entEnvoi) return;
     if (!entAgent) { showError('Choisissez d\'abord votre nom en haut de l\'écran.'); return; }
-    const fn = { debut: 'entDebuter', fin: 'entTerminer', annuler: 'entAnnuler' }[action];
+    if (action === 'nonfait') { entJustif = tache + '|' + occ; entJustifBrouillon = ''; entRendre_(); return; }
+    if (action === 'nonfait_x') { entJustif = null; entJustifBrouillon = ''; entRendre_(); return; }
+    let justif = '';
+    if (action === 'nonfait_ok') {
+        justif = entJustifBrouillon.trim();
+        if (justif.length < 3) { document.getElementById('entJustifErr').textContent = 'La justification est obligatoire.'; return; }
+    }
+    const fn = { debut: 'entDebuter', fin: 'entTerminer', annuler: 'entAnnuler', nonfait_ok: 'entNonFait' }[action];
     if (!fn) return;
     const urgence = tache.indexOf('rem:') === 0;
     const avant = urgence ? (entDonnees.urgences || []).find(u => u.tache === tache) : null;
@@ -8087,12 +8152,15 @@ function entAction_(action, tache, occ) {
                 if (r && r.tableau) entAppliquer_(r.tableau, true);
                 return;
             }
+            if (action === 'nonfait_ok') { entJustif = null; entJustifBrouillon = ''; showInfo('Tâche notée « non faite ».'); }
             entAppliquer_(r, true);
             if (action === 'fin') showInfo('✅ Tâche terminée.');
             if (action === 'fin' && urgence) entTraiterUrgence_(occ, avant);
         })
         .withFailureHandler(err => { hideLoading(); entEnvoi--; showError('Connexion impossible : ' + dbEsc(err.message)); });
-    if (action === 'annuler') run[fn](tache, occ); else run[fn](tache, occ, entAgent);
+    if (action === 'annuler') run[fn](tache, occ);
+    else if (action === 'nonfait_ok') run[fn](tache, occ, entAgent, justif);
+    else run[fn](tache, occ, entAgent);
 }
 
 // Fin d'une urgence : la remontée « Chambre » passe en « traitée » (Apps Script : archive, push « traitée »)
@@ -8110,7 +8178,7 @@ function entTraiterUrgence_(id, u) {
 
 // ----- Écran « Suivi » -----
 const ENT_PERIODES = [['jour', 'Aujourd\'hui'], ['semaine', 'Cette semaine'], ['semaine_prec', 'Semaine dernière'], ['mois', 'Ce mois'], ['mois_prec', 'Mois dernier']];
-const ENT_FILTRES = [['tous', 'Tout'], ['retard', 'En retard'], ['en_cours', 'En cours'], ['a_faire', 'À faire'], ['fait', 'Faites']];
+const ENT_FILTRES = [['tous', 'Tout'], ['retard', 'En retard'], ['en_cours', 'En cours'], ['a_faire', 'À faire'], ['fait', 'Faites'], ['non_fait', 'Non faites']];
 function entIso_(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
 function entBornes_(p) {
     const j = new Date(); j.setHours(12, 0, 0, 0);
@@ -8155,7 +8223,7 @@ function entRendreSuivi_() {
 
     const taches = (r.taches || []).filter(t => !entSuiviAgent || t.agent === entSuiviAgent);
     const urg = (r.urgences || []).filter(u => !entSuiviAgent || u.fait_par === entSuiviAgent);
-    const n = { total: taches.length, fait: 0, en_cours: 0, retard: 0, a_faire: 0 };
+    const n = { total: taches.length, fait: 0, en_cours: 0, retard: 0, a_faire: 0, non_fait: 0 };
     taches.forEach(t => {
         const s = entStatut_(t);
         if (s === 'fait' || s === 'fait_retard') n.fait++; else n[s]++;
@@ -8165,6 +8233,7 @@ function entRendreSuivi_() {
         '<div class="ent-kpi"><span>Faites</span><b>' + n.fait + ' / ' + n.total + '</b> <span>' + taux + ' %</span></div>'
         + '<div class="ent-kpi"><span>En cours</span><b>' + n.en_cours + '</b></div>'
         + '<div class="ent-kpi rouge"><span>En retard</span><b>' + n.retard + '</b></div>'
+        + '<div class="ent-kpi rouge"><span>Non faites</span><b>' + n.non_fait + '</b></div>'
         + '<div class="ent-kpi"><span>Urgences traitées</span><b>' + urg.filter(u => u.fin).length + '</b></div>';
 
     // Temps passé par agent (qui a commencé la tâche), urgences comprises
@@ -8180,8 +8249,8 @@ function entRendreSuivi_() {
         return s === entSuiviStatut;
     };
     const liste = taches.filter(garder).sort(entTrier_);
-    let h = '<div class="ent-liste">' + (liste.length ? liste.map(t => entLigne_(t, false, agents).replace('</div><div class="ent-meta">',
-        '</div><div class="ent-meta">' + dbEsc(entNomAgent_(t.agent, agents)) + ' · ')).join('') : '<div class="ent-vide">Aucune tâche pour ce filtre.</div>') + '</div>';
+    let h = liste.length ? entListeGroupee_(liste, false, agents, t => dbEsc(entNomAgent_(t.agent, agents)) + ' · ')
+        : '<div class="ent-liste"><div class="ent-vide">Aucune tâche pour ce filtre.</div></div>';
     if (urg.length && (entSuiviStatut === 'tous' || entSuiviStatut === 'fait' || entSuiviStatut === 'en_cours')) {
         const lu = urg.filter(u => entSuiviStatut === 'tous' || (entSuiviStatut === 'fait' ? !!u.fin : !u.fin));
         if (lu.length) h += '<div class="ent-titre">Urgences</div><div class="ent-liste">' + lu.map(u =>
@@ -8191,6 +8260,92 @@ function entRendreSuivi_() {
     document.getElementById('entSuiviListe').innerHTML = h;
 }
 
+
+// ----- Export Excel de la synthèse (période affichée dans Suivi, tous les agents) -----
+const ENT_XLSX_LIB = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+function entDateCellule_(iso) { return iso ? new Date(iso) : ''; }
+async function entExporterExcel() {
+    const r = entSuiviDonnees;
+    if (!r || !r.success) { showError('Chargez d\'abord le suivi.'); return; }
+    showLoading();
+    try {
+        await beChargerLib(ENT_XLSX_LIB);
+        const agents = r.agents || [];
+        const taches = r.taches || [], urg = r.urgences || [];
+        const nom = n => entNomAgent_(n, agents);
+        const fr = iso => { const p = String(iso).split('-'); return p[2] + '/' + p[1] + '/' + p[0]; };
+        const duree = t => (t.duree_min === null || t.duree_min === undefined) ? '' : Number(t.duree_min);
+        const compte = l => {
+            const c = { prevues: l.length, faites: 0, faites_retard: 0, non_faites: 0, retard: 0, en_cours: 0, a_faire: 0, minutes: 0, avecDuree: 0 };
+            l.forEach(t => {
+                const s = entStatut_(t);
+                if (s === 'fait') c.faites++;
+                else if (s === 'fait_retard') { c.faites++; c.faites_retard++; }
+                else if (s === 'non_fait') c.non_faites++;
+                else c[s]++;
+                if (duree(t) !== '') { c.minutes += duree(t); c.avecDuree++; }
+            });
+            c.taux = c.prevues ? Math.round(c.faites * 1000 / c.prevues) / 10 : 0;
+            return c;
+        };
+        const wb = XLSX.utils.book_new();
+
+        // 1. Synthèse par agent et par type de tâche
+        const synth = [['Synthèse des tâches d\'entretien du ' + fr(r.du) + ' au ' + fr(r.au)], [],
+            ['Agent', 'Type', 'Prévues', 'Faites', 'dont faites en retard', 'Non faites', 'En retard (pas faites)', 'En cours', 'À faire', 'Taux de réalisation (%)', 'Temps passé (min)']];
+        agents.forEach(a => {
+            ENT_GROUPES.concat([['tout', 'Total', null]]).forEach(g => {
+                const l = taches.filter(t => t.agent === a.num && (!g[2] || g[2].indexOf(t.frequence) !== -1));
+                if (!l.length) return;
+                const c = compte(l);
+                synth.push([a.nom, g[1], c.prevues, c.faites, c.faites_retard, c.non_faites, c.retard, c.en_cours, c.a_faire, c.taux, c.minutes]);
+            });
+        });
+        const ct = compte(taches);
+        synth.push(['Tous les agents', 'Total', ct.prevues, ct.faites, ct.faites_retard, ct.non_faites, ct.retard, ct.en_cours, ct.a_faire, ct.taux, ct.minutes]);
+        synth.push([], ['Urgences (remontées chambre)', '', urg.length, urg.filter(u => u.fin).length, '', '', '', urg.filter(u => !u.fin).length, '', '',
+            urg.reduce((m, u) => m + (Number(u.duree_min) || 0), 0)]);
+        const ws1 = XLSX.utils.aoa_to_sheet(synth);
+        ws1['!cols'] = [{ wch: 26 }, { wch: 14 }].concat(Array(9).fill({ wch: 14 }));
+        XLSX.utils.book_append_sheet(wb, ws1, 'Synthèse');
+
+        // 2. Par tâche
+        const parTache = [['Type', 'Zone', 'Tâche', 'Agent', 'Fréquence', 'Prévues', 'Faites', 'Non faites', 'En retard', 'Taux (%)', 'Temps moyen (min)']];
+        const ids = Array.from(new Set(taches.map(t => t.tache)));
+        ids.map(id => taches.filter(t => t.tache === id))
+            .sort((a, b) => (a[0].ordre || 0) - (b[0].ordre || 0))
+            .forEach(l => {
+                const t = l[0], c = compte(l);
+                parTache.push([entGroupe_(t.frequence), t.zone, t.libelle, nom(t.agent), ENT_FREQ[t.frequence] || t.frequence,
+                    c.prevues, c.faites, c.non_faites, c.retard, c.taux, c.avecDuree ? Math.round(c.minutes / c.avecDuree) : '']);
+            });
+        const ws2 = XLSX.utils.aoa_to_sheet(parTache);
+        ws2['!cols'] = [{ wch: 14 }, { wch: 22 }, { wch: 60 }, { wch: 14 }, { wch: 20 }].concat(Array(6).fill({ wch: 12 }));
+        ws2['!autofilter'] = { ref: 'A1:K' + parTache.length };
+        XLSX.utils.book_append_sheet(wb, ws2, 'Par tâche');
+
+        // 3. Détail (une ligne par échéance, + urgences)
+        const detail = [['Échéance', 'Type', 'Zone', 'Tâche', 'Agent prévu', 'Statut', 'Début', 'Fin', 'Durée (min)', 'Commencé par', 'Terminé par', 'Justification (non fait)']];
+        taches.slice().sort((a, b) => new Date(a.echeance) - new Date(b.echeance) || (a.ordre || 0) - (b.ordre || 0)).forEach(t => {
+            detail.push([entDateCellule_(t.echeance), entGroupe_(t.frequence), t.zone, t.libelle, nom(t.agent), ENT_STATUTS[entStatut_(t)],
+                entDateCellule_(t.debut), entDateCellule_(t.fin || t.non_fait_le), duree(t),
+                t.fait_par ? nom(t.fait_par) : '', t.termine_par ? nom(t.termine_par) : '', t.justification || '']);
+        });
+        urg.forEach(u => detail.push([entDateCellule_(u.debut), 'Urgence', 'Chambre', u.libelle, '', u.fin ? 'Fait' : 'En cours',
+            entDateCellule_(u.debut), entDateCellule_(u.fin), duree(u),
+            u.fait_par ? nom(u.fait_par) : '', u.termine_par ? nom(u.termine_par) : '', '']));
+        const ws3 = XLSX.utils.aoa_to_sheet(detail, { cellDates: true, dateNF: 'dd/mm/yyyy hh:mm' });
+        ws3['!cols'] = [{ wch: 17 }, { wch: 13 }, { wch: 22 }, { wch: 60 }, { wch: 14 }, { wch: 14 }, { wch: 17 }, { wch: 17 }, { wch: 11 }, { wch: 14 }, { wch: 14 }, { wch: 50 }];
+        ws3['!autofilter'] = { ref: 'A1:L' + detail.length };
+        XLSX.utils.book_append_sheet(wb, ws3, 'Détail');
+
+        XLSX.writeFile(wb, 'Entretien_' + r.du + '_au_' + r.au + '.xlsx', { cellDates: true });
+        hideLoading();
+    } catch (e) {
+        hideLoading();
+        showError('Export impossible : ' + dbEsc(e.message || e));
+    }
+}
 // ----- Modification des agents (nom, secteur, fin de poste) : mot de passe admin -----
 function entEditionAgents(ouvrir) {
     const box = document.getElementById('entAgentsEdition');
@@ -11797,7 +11952,7 @@ const SY_ECRANS = {
                          modifie: () => Array.from(document.querySelectorAll('#qhseListe textarea[data-id]')).some(t => t.value !== t.defaultValue) },
     formColisFragiles: { modules: ['colis'],      relire: () => cfRecharger_(), tableau: '#cfBody',
                          message: 'L\'enregistrement sera refusé pour ne rien écraser : notez vos changements, rechargez, puis ressaisissez-les.' },
-    formEntretien:     { modules: ['entretien'],  relire: () => entRecharger_(), occupe: () => entEnvoi > 0 } // [ENTRETIEN]
+    formEntretien:     { modules: ['entretien'],  relire: () => entRecharger_(), occupe: () => entEnvoi > 0 || entJustif !== null } // [ENTRETIEN]
 };
 let syVu = null;              // dernières heures de modification connues { module: version }
 let syAttente = null;         // id de l'écran à relire dès que possible
