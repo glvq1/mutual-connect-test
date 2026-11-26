@@ -14,7 +14,7 @@
 <script>
 window.MC_EXEC_URL = 'https://script.google.com/macros/s/AKfycbxbm1vLfINpV-_amVyCflk6pdR5A7LhXDJjoWTR2U13H6ywkLq718pEZ7n_N31EZWRp/exec';
 // Modules passés sur Supabase (les autres restent sur Apps Script). Clé publique : lecture et fonctions contrôlées seulement.
-window.MC_SUPABASE = {"url": "https://qrxdmibqzycumbzdxgyd.supabase.co", "cle": "sb_publishable_VFoLXNLumDvr6U3UF-DqRQ_Ww5EAlnj", "site": "allonnes", "modules": {"gares": true, "remontees": true, "stockage": true, "colis": true}};
+window.MC_SUPABASE = {"url": "https://qrxdmibqzycumbzdxgyd.supabase.co", "cle": "sb_publishable_VFoLXNLumDvr6U3UF-DqRQ_Ww5EAlnj", "site": "allonnes", "modules": {"gares": true, "remontees": true, "stockage": true, "colis": true, "entretien": true}};
 // Messages de l'appli envoyés avant que la coquille soit prête (traités au démarrage de la coquille)
 window.mcsFile = [];
 addEventListener('message', function (e) { if (window.mcsFile) window.mcsFile.push(e); });
@@ -48,7 +48,9 @@ addEventListener('message', function (e) { if (window.mcsFile) window.mcsFile.pu
       loadData: function (args) { return /^form\d{1,2}_records$/.test(String(args[0] || '')) ? null : 'kv_lire'; },
       saveData: 'kv_ecrire'
     },
-    colis: { listerColisFragiles: 'cf_lister', enregistrerColisFragiles: 'cf_enregistrer' }
+    colis: { listerColisFragiles: 'cf_lister', enregistrerColisFragiles: 'cf_enregistrer' },
+    // [ENTRETIEN] tâches des agents d'entretien : tout en direct (pas de version Apps Script)
+    entretien: { entTableau: 'ent_tableau', entSuivi: 'ent_suivi', entDebuter: 'ent_debuter', entTerminer: 'ent_terminer', entAnnuler: 'ent_annuler' }
   };
   var routeSb = {};
   if (SB && SB.url && SB.cle) {
@@ -149,7 +151,8 @@ addEventListener('message', function (e) { if (window.mcsFile) window.mcsFile.pu
     gares: ['gares_attributions', 'portes_attributions', 'gares_blocages', 'tournees_parties', 'plans_chargement'],
     remontees: ['remontees'],
     stockage: ['stockage'],
-    colis: ['stockage']
+    colis: ['stockage'],
+    entretien: ['entretien_executions', 'remontees']
   };
   // Modules de synchro de l'appli touchés par un changement (payload Supabase)
   var CIBLES = {
@@ -167,9 +170,15 @@ addEventListener('message', function (e) { if (window.mcsFile) window.mcsFile.pu
     colis: function (p) {
       var k = String(((p && p.new) || {}).cle || ((p && p.old) || {}).cle || '');
       return (!p || k === 'colis_fragiles') ? ['colis'] : [];
+    },
+    // Exécutions, ou remontée « Chambre » (urgence) ajoutée / traitée
+    entretien: function (p) {
+      if (!p || p.table === 'entretien_executions') return ['entretien'];
+      var f = ((p.new || {}).form) || ((p.old || {}).form);
+      return (f === undefined || Number(f) === 11) ? ['entretien'] : [];
     }
   };
-  var SYNCHROS = { gares: ['gares'], remontees: [], stockage: ['tournees', 'anomalie', 'nettoyage', 'pointages'], colis: ['colis'] };
+  var SYNCHROS = { gares: ['gares'], remontees: [], stockage: ['tournees', 'anomalie', 'nettoyage', 'pointages'], colis: ['colis'], entretien: ['entretien'] };
   // Action directe : remontées → relecture immédiate (sinon toutes les 15 s)
   var ACTIONS = {
     remontees: function () { if (typeof window.rafraichirRemontees === 'function') { try { window.rafraichirRemontees(); } catch (e) {} } }
@@ -3159,6 +3168,71 @@ html.mc-sombre:not(.mc-gares-papier) .ga-bloc td.porte.pr { background: #2b1714;
 html.mc-sombre:not(.mc-gares-papier) .ga-bloc .ga-tt { filter: brightness(.75); color: #fff; }
 html.mc-sombre:not(.mc-gares-papier) .ga-bloc td.t-coupe { border-top-color: #e5e5e5; }
 html.mc-sombre .ga-extra input.ga-autre-t, html.mc-sombre .ga-extra input.ga-po-s { background: #26231f; border-color: #363636; color: var(--dark); }
+
+/* ===== [ENTRETIEN] tâches des agents d'entretien ===== */
+.db-mod.m-ent { border-left-color: #1e8449; }
+.m-ent .db-mod-ico { background: #e8f6ee; color: #1e6b4f; }
+.ent-onglets { display: flex; gap: 8px; margin: 0 0 14px; }
+.ent-onglet { flex: 1; min-height: 56px; border-radius: 12px; border: 2px solid var(--line); background: #fff; color: var(--secondary); font-family: inherit; font-size: 16px; font-weight: 800; cursor: pointer; touch-action: manipulation; }
+.ent-onglet.on { border-color: var(--secondary); background: var(--secondary); color: #fff; }
+.ent-agents { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 16px; }
+.ent-agent { flex: 1 1 200px; min-height: 56px; padding: 6px 12px; border-radius: 12px; border: 2px solid var(--line); background: #fff; color: var(--dark); font-family: inherit; text-align: left; cursor: pointer; touch-action: manipulation; }
+.ent-agent b { display: block; font-size: 16px; }
+.ent-agent small { font-size: 13px; color: var(--text-muted); }
+.ent-agent.on { border-color: #1e8449; box-shadow: inset 0 0 0 2px #1e8449; background: #f1faf4; }
+.ent-aide { margin: 0 0 14px; padding: 12px 14px; border-radius: 10px; background: #fdf0d8; color: #7a4a00; font-weight: 700; }
+.ent-titre { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 18px 0 8px; font-size: 15px; font-weight: 800; letter-spacing: .5px; text-transform: uppercase; color: var(--secondary); }
+.ent-titre button { min-height: 44px; padding: 0 14px; border-radius: 10px; border: 2px solid var(--line); background: #fff; color: var(--secondary); font-family: inherit; font-weight: 700; font-size: 14px; text-transform: none; letter-spacing: 0; cursor: pointer; }
+.ent-liste { display: flex; flex-direction: column; border: 2px solid var(--line); border-radius: 12px; overflow: hidden; background: #fff; }
+.ent-row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 1px solid var(--line); }
+.ent-row:first-child { border-top: 0; }
+.ent-row.s-retard { box-shadow: inset 5px 0 0 #c0392b; }
+.ent-row.s-en_cours { box-shadow: inset 5px 0 0 #d68910; background: #fffaf0; }
+.ent-row.s-fait, .ent-row.s-fait_retard { opacity: .7; }
+.ent-row.urg { background: #fdecea; box-shadow: inset 5px 0 0 #c0392b; }
+.ent-txt { flex: 1; min-width: 0; }
+.ent-lib { font-size: 16px; font-weight: 700; color: var(--dark); line-height: 1.35; }
+.ent-meta { margin-top: 3px; font-size: 13px; color: var(--text-muted); line-height: 1.4; }
+.ent-exec { margin-top: 4px; font-size: 13px; font-weight: 700; color: var(--secondary); }
+.ent-pill { display: inline-block; padding: 2px 9px; border-radius: 10px; font-size: 12px; font-weight: 800; white-space: nowrap; }
+.ent-pill.s-a_faire { background: #f3eee3; color: var(--secondary); }
+.ent-pill.s-en_cours { background: #fdf0d8; color: #a85400; }
+.ent-pill.s-retard { background: #fdecea; color: #c0392b; }
+.ent-pill.s-fait { background: #e8f6ee; color: #1e6b4f; }
+.ent-pill.s-fait_retard { background: #fdf0d8; color: #a85400; }
+.ent-pill.p-Forte { background: #fdecea; color: #c0392b; }
+.ent-pill.p-Moyen { background: #fdf0d8; color: #a85400; }
+.ent-pill.p-Faible { background: #eef2f5; color: #5d6d7e; }
+.ent-act { display: flex; flex-direction: column; align-items: stretch; gap: 6px; flex: none; }
+.ent-btn { min-height: 56px; min-width: 112px; padding: 0 16px; border-radius: 12px; border: 0; font-family: inherit; font-size: 17px; font-weight: 800; cursor: pointer; touch-action: manipulation; }
+.ent-btn.debut { background: #1e8449; color: #fff; }
+.ent-btn.fin { background: #c0392b; color: #fff; }
+.ent-btn.annuler { min-height: 44px; font-size: 14px; background: transparent; border: 2px solid var(--line); color: var(--text-muted); }
+.ent-vide { padding: 16px; text-align: center; color: var(--text-muted); font-style: italic; }
+.ent-filtres { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 10px; }
+.ent-chip { min-height: 44px; padding: 0 14px; border-radius: 22px; border: 2px solid var(--line); background: #fff; color: var(--secondary); font-family: inherit; font-size: 14px; font-weight: 700; cursor: pointer; touch-action: manipulation; }
+.ent-chip.on { border-color: var(--secondary); background: var(--secondary); color: #fff; }
+.ent-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin: 6px 0 10px; }
+.ent-kpi { padding: 12px 14px; border-radius: 12px; background: #fff; border: 2px solid var(--line); }
+.ent-kpi span { display: block; font-size: 13px; color: var(--text-muted); }
+.ent-kpi b { font-size: 24px; color: var(--dark); }
+.ent-kpi.rouge b { color: #c0392b; }
+.ent-parag { margin: 0 0 12px; font-size: 14px; color: var(--text-muted); }
+@media (max-width: 560px) { .ent-row { flex-wrap: wrap; } .ent-act { flex-direction: row; width: 100%; } .ent-btn { flex: 1; } }
+html.mc-sombre .m-ent .db-mod-ico { background: #16301f; color: #7fd6a3; }
+html.mc-sombre .ent-onglet, html.mc-sombre .ent-agent, html.mc-sombre .ent-liste, html.mc-sombre .ent-titre button,
+html.mc-sombre .ent-chip, html.mc-sombre .ent-kpi { background: #26231f; border-color: #363636; color: var(--dark); }
+html.mc-sombre .ent-onglet.on, html.mc-sombre .ent-chip.on { background: var(--primary); border-color: var(--primary); color: #171512; }
+html.mc-sombre .ent-agent.on { background: #16301f; border-color: #6fcf9f; box-shadow: inset 0 0 0 2px #6fcf9f; }
+html.mc-sombre .ent-aide { background: #3d2c10; color: #f3b35c; }
+html.mc-sombre .ent-row.s-en_cours { background: #2f2714; }
+html.mc-sombre .ent-row.urg { background: #341714; }
+html.mc-sombre .ent-pill.s-a_faire { background: #3d321a; color: var(--secondary); }
+html.mc-sombre .ent-pill.s-en_cours, html.mc-sombre .ent-pill.s-fait_retard, html.mc-sombre .ent-pill.p-Moyen { background: #3d2c10; color: #f3b35c; }
+html.mc-sombre .ent-pill.s-retard, html.mc-sombre .ent-pill.p-Forte { background: #341714; color: #ff8a7a; }
+html.mc-sombre .ent-pill.s-fait { background: #16301f; color: #7fd6a3; }
+html.mc-sombre .ent-pill.p-Faible { background: #22282d; color: #aab7c4; }
+html.mc-sombre .ent-kpi.rouge b { color: #ff8a7a; }
     </style>
 </head>
 <body>
@@ -3421,6 +3495,12 @@ html.mc-sombre .ga-extra input.ga-autre-t, html.mc-sombre .ga-extra input.ga-po-
                             <span class="db-mod-top"><span class="db-mod-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><rect x="5" y="2.5" width="14" height="19" rx="2"/><path d="M9 6.5h6"/><path d="M9 10.5h6"/><path d="M9 14.5h3"/><circle cx="12" cy="18.5" r=".6"/></svg></span><span class="db-badge zero" id="dbBadgeLocaux">0</span></span>
                             <span class="db-mod-t">Locaux</span>
                             <span class="db-mod-d" id="dbLocauxDesc">Gestion des locaux</span>
+                        </div>
+                        <!-- [ENTRETIEN] tâches des agents d'entretien (horodatage début / fin, suivi) -->
+                        <div class="db-mod m-ent" role="button" tabindex="0" onclick="showForm('formEntretien')">
+                            <span class="db-mod-top"><span class="db-mod-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 3.5 12 11"/><path d="M10.5 9.5 14.5 13.5"/><path d="M10.5 9.5 4 16l1 3.5 3.5 1L15 14"/><path d="M6.5 18 9 15.5"/></svg></span></span>
+                            <span class="db-mod-t">Entretien</span>
+                            <span class="db-mod-d">Tâches des agents d'entretien</span>
                         </div>
                         <div class="db-mod m-qual" role="button" tabindex="0" onclick="showBloc('menuQhse')">
                             <span class="db-mod-top"><span class="db-mod-ico"><svg class="ic" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 10V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v5"/><path d="M14 6a6 6 0 0 1 6 6v3"/><path d="M4 15v-3a6 6 0 0 1 6-6"/><rect x="2" y="15" width="20" height="4" rx="1"/></svg></span><span class="db-badge zero" id="dbBadgeQhse">0</span></span>
@@ -3808,7 +3888,7 @@ html.mc-sombre .ga-extra input.ga-autre-t, html.mc-sombre .ga-extra input.ga-po-
                 </div>
                 <div class="menu-card" onclick="showForm('formChambre')">
                     <div class="menu-card-icon">❄️</div>
-                    <div class="menu-card-text"><div class="menu-card-title">Chambre</div><div class="menu-card-description">Plaque de glace (allée et emplacement)</div></div>
+                    <div class="menu-card-text"><div class="menu-card-title">Chambre</div><div class="menu-card-description">Plaque de glace, flaque au sol, givre sur une porte</div></div>
                 </div>
                 <div class="menu-card" onclick="showForm('formToilettes')">
                     <div class="menu-card-icon">🚻</div>
@@ -4249,6 +4329,30 @@ html.mc-sombre .ga-extra input.ga-autre-t, html.mc-sombre .ga-extra input.ga-po-
             <button class="btn-add-row" onclick="addTransfertPickingRow()">➕ Ajouter un transfert</button>
             <button class="btn-save" onclick="envoyerTransfertsPicking()">📧 Envoyer les transferts</button>
             <div id="successTransfertPicking" class="success-message"><div class="success-icon">✅</div><div>Transferts envoyés avec succès !</div></div>
+        </div>
+
+        <!-- ===== [ENTRETIEN] TÂCHES DES AGENTS D'ENTRETIEN ===== -->
+        <div id="formEntretien" class="form-section">
+            <button class="back-button" onclick="backToMenu()">← Retour à l'accueil</button>
+            <div class="form-header"><div class="form-icon">🧹</div><div class="form-title">Entretien</div></div>
+            <div class="ent-onglets">
+                <button type="button" class="ent-onglet on" id="entOngletTaches" onclick="entChoisirVue('taches')">Mes tâches</button>
+                <button type="button" class="ent-onglet" id="entOngletSuivi" onclick="entChoisirVue('suivi')">Suivi</button>
+            </div>
+            <div id="entVueTaches">
+                <div class="ent-agents" id="entAgents"></div>
+                <div id="entTaches"></div>
+            </div>
+            <div id="entVueSuivi" style="display:none">
+                <div class="ent-titre" style="margin-top:0">Agents<button type="button" onclick="entEditionAgents(true)">✏️ Modifier les agents</button></div>
+                <div id="entAgentsEdition" style="display:none"></div>
+                <div class="ent-filtres" id="entSuiviPeriodes"></div>
+                <div class="ent-filtres" id="entSuiviAgents"></div>
+                <div class="ent-kpis" id="entSuiviKpis"></div>
+                <div class="ent-parag" id="entSuiviTemps"></div>
+                <div class="ent-filtres" id="entSuiviStatuts"></div>
+                <div id="entSuiviListe"></div>
+            </div>
         </div>
 
         <!-- ===== [COLIS FRAGILES] RÉPERTOIRE DES PRODUITS FRAGILES ===== -->
@@ -5884,7 +5988,7 @@ function initForms() {
 // Mêmes listes et même contrôle des doublons que la borne (serveur : envoyerRemonteeLocaux).
 const LOCAUX_FORMS = {
     formPause:     { type: 'pause',     probs: ['Micro-ondes HS', 'Frigo HS', 'Machine à café en panne', 'Distributeur en panne', 'Casse'] },
-    formChambre:   { type: 'chambre',   probs: ['Plaque de glace'] },
+    formChambre:   { type: 'chambre',   probs: ['Plaque de glace', 'Flaque au sol', 'Givre sur une porte'] },
     formToilettes: { type: 'toilettes', probs: ['Toilette bouchée', 'Lunette cassée', 'Lavabo cassé', 'Distributeur de mouchoirs vide'], cotes: true },
     formVestiaire: { type: 'vestiaire', probs: ['Casier cassé', 'Armoire chauffage HS'], cotes: true },
     formDivers:    { type: 'divers' }
@@ -7810,6 +7914,332 @@ function gaMajBoutonPapier() {
 }
 gaMajBoutonPapier();
 
+// ===== [ENTRETIEN] TÂCHES DES AGENTS D'ENTRETIEN (Supabase : ent_tableau, ent_debuter… ; urgences : Entretien.gs) =====
+// Chaque tâche a un agent « favori », mais chacun peut valider les tâches de l'autre.
+// Horodatage : « Début » puis « Fin ». Urgences = remontées « Chambre » non traitées (la fin les passe en « traitée »).
+const ENT_FREQ = { J2: '2 fois par jour', J1: 'Chaque jour', S2: '2 fois par semaine', S1: 'Chaque semaine', W3: 'Toutes les 3 semaines', M1: 'Chaque mois' };
+const ENT_STATUTS = { a_faire: 'À faire', en_cours: 'En cours', retard: 'En retard', fait: 'Fait', fait_retard: 'Fait en retard' };
+const ENT_RANG = { retard: 0, en_cours: 1, a_faire: 2, fait_retard: 3, fait: 3 };
+const ENT_CLE_AGENT = 'mc_ent_agent'; // agent choisi sur cet appareil (simple confort, l'identification viendra plus tard)
+const ENT_JOURS = ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'];
+let entVue = 'taches';
+let entDonnees = null;        // dernier ent_tableau
+let entSuiviDonnees = null;   // dernier ent_suivi
+let entEnvoi = 0;             // appels d'écriture en cours
+let entAgent = 0;
+try { entAgent = Number(localStorage.getItem(ENT_CLE_AGENT)) || 0; } catch (e) {}
+let entAutresOuvertes = false;
+let entSuiviPeriode = 'semaine', entSuiviAgent = 0, entSuiviStatut = 'tous';
+
+function entOuvrir() { entChoisirVue(entVue); }
+
+function entChoisirVue(v) {
+    entVue = v === 'suivi' ? 'suivi' : 'taches';
+    document.getElementById('entOngletTaches').classList.toggle('on', entVue === 'taches');
+    document.getElementById('entOngletSuivi').classList.toggle('on', entVue === 'suivi');
+    document.getElementById('entVueTaches').style.display = entVue === 'taches' ? '' : 'none';
+    document.getElementById('entVueSuivi').style.display = entVue === 'suivi' ? '' : 'none';
+    if (entVue === 'taches') entCharger(false); else entChargerSuivi(false);
+}
+
+// [SYNCHRO] relecture sans écran de chargement
+function entRecharger_() { if (entVue === 'suivi') entChargerSuivi(true); else entCharger(true); }
+
+function entCharger(silencieux) {
+    if (!silencieux) {
+        if (!entDonnees) document.getElementById('entTaches').innerHTML = '<div class="ent-vide">Chargement…</div>';
+        showLoading();
+    }
+    google.script.run
+        .withSuccessHandler(r => { if (!silencieux) hideLoading(); entAppliquer_(r, silencieux); })
+        .withFailureHandler(err => { if (!silencieux) { hideLoading(); showError('Connexion impossible : ' + dbEsc(err.message)); } })
+        .entTableau();
+}
+
+function entAppliquer_(r, silencieux) {
+    if (!r || !r.success) { if (!silencieux) showError(dbEsc((r && r.error) || 'Tâches indisponibles.')); return; }
+    entDonnees = r;
+    if (entAgent && !(r.agents || []).some(a => a.num === entAgent)) entAgent = 0;
+    entRendre_();
+    syMemoriser('formEntretien');
+}
+
+// ----- Mise en forme -----
+function entNomAgent_(n, agents) {
+    const a = (agents || (entDonnees && entDonnees.agents) || []).find(x => x.num === Number(n));
+    return a ? a.nom : (n ? 'Agent ' + n : '');
+}
+function entHeure_(iso) {
+    const d = new Date(iso);
+    return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+}
+function entJourCle_(d) { return d.getFullYear() + '-' + (d.getMonth() + 1) + '-' + d.getDate(); }
+// « aujourd'hui 17:00 », « demain 12:00 », « ven. 28/11 17:00 »
+function entQuand_(iso) {
+    const d = new Date(iso), auj = new Date(), dem = new Date();
+    dem.setDate(dem.getDate() + 1);
+    if (entJourCle_(d) === entJourCle_(auj)) return 'aujourd\'hui ' + entHeure_(iso);
+    if (entJourCle_(d) === entJourCle_(dem)) return 'demain ' + entHeure_(iso);
+    return ENT_JOURS[d.getDay()] + ' ' + String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + ' ' + entHeure_(iso);
+}
+function entDuree_(min) {
+    min = Math.max(0, Math.round(Number(min) || 0));
+    return min < 60 ? min + ' min' : Math.floor(min / 60) + 'h' + String(min % 60).padStart(2, '0');
+}
+// Le statut « en retard » change avec l'heure : recalculé à l'affichage
+function entStatut_(t) {
+    if (t.statut === 'a_faire' && t.echeance && Date.now() > new Date(t.echeance).getTime()) return 'retard';
+    return t.statut;
+}
+function entExec_(t, agents) {
+    if (t.debut && !t.fin) return '▶ Commencé à ' + entHeure_(t.debut) + ' par ' + dbEsc(entNomAgent_(t.fait_par, agents));
+    if (t.fin) {
+        const par = entNomAgent_(t.fait_par, agents), fin = t.termine_par && t.termine_par !== t.fait_par ? entNomAgent_(t.termine_par, agents) : '';
+        return '✓ ' + entHeure_(t.debut) + ' → ' + entHeure_(t.fin) + ' · ' + entDuree_(t.duree_min) + ' · ' + dbEsc(par) + (fin ? ' (terminé par ' + dbEsc(fin) + ')' : '');
+    }
+    return '';
+}
+function entBoutons_(t, statut) {
+    const d = 'data-t="' + dbEsc(t.tache) + '" data-o="' + dbEsc(t.occurrence) + '"';
+    if (statut === 'en_cours') return '<button type="button" class="ent-btn fin" data-a="fin" ' + d + '>⏹ Fin</button>'
+        + '<button type="button" class="ent-btn annuler" data-a="annuler" ' + d + '>Annuler</button>';
+    if (statut === 'a_faire' || statut === 'retard') return '<button type="button" class="ent-btn debut" data-a="debut" ' + d + '>▶ Début</button>';
+    return '';
+}
+function entLigne_(t, avecBoutons, agents) {
+    const st = entStatut_(t);
+    const meta = [dbEsc(t.zone), ENT_FREQ[t.frequence] || '', 'échéance ' + entQuand_(t.echeance)];
+    if (t.preference) meta.push('de préférence : ' + dbEsc(t.preference));
+    const prio = t.priorite ? ' <span class="ent-pill p-' + dbEsc(t.priorite) + '">' + dbEsc(t.priorite) + '</span>' : '';
+    const exec = entExec_(t, agents);
+    return '<div class="ent-row s-' + st + '"><div class="ent-txt">'
+        + '<div class="ent-lib">' + dbEsc(t.libelle) + '</div>'
+        + '<div class="ent-meta"><span class="ent-pill s-' + st + '">' + ENT_STATUTS[st] + '</span>' + prio + ' ' + meta.filter(Boolean).join(' · ') + '</div>'
+        + (exec ? '<div class="ent-exec">' + exec + '</div>' : '')
+        + '</div>' + (avecBoutons ? '<div class="ent-act">' + entBoutons_(t, st) + '</div>' : '') + '</div>';
+}
+function entLigneUrgence_(u) {
+    const st = u.statut;
+    const meta = [u.lieu ? dbEsc(u.lieu) : '', u.signale_le ? 'signalé ' + entQuand_(u.signale_le) : '', u.signale_par ? 'par ' + dbEsc(u.signale_par) : ''];
+    const exec = entExec_(u);
+    return '<div class="ent-row urg s-' + st + '"><div class="ent-txt">'
+        + '<div class="ent-lib">🚨 ' + dbEsc(u.libelle) + '</div>'
+        + '<div class="ent-meta">' + meta.filter(Boolean).join(' · ') + (u.description ? '<br>' + dbEsc(u.description) : '') + '</div>'
+        + (exec ? '<div class="ent-exec">' + exec + '</div>' : '')
+        + '</div><div class="ent-act">' + entBoutons_(u, st) + '</div></div>';
+}
+function entTrier_(a, b) {
+    const ra = ENT_RANG[entStatut_(a)], rb = ENT_RANG[entStatut_(b)];
+    if (ra !== rb) return ra - rb;
+    const ea = new Date(a.echeance).getTime(), eb = new Date(b.echeance).getTime();
+    return ea !== eb ? ea - eb : (a.ordre || 0) - (b.ordre || 0);
+}
+
+// ----- Écran « Mes tâches » -----
+function entRendre_() {
+    const r = entDonnees;
+    if (!r) return;
+    document.getElementById('entAgents').innerHTML = (r.agents || []).map(a =>
+        '<button type="button" class="ent-agent' + (a.num === entAgent ? ' on' : '') + '" data-agent="' + a.num + '">'
+        + '<b>' + dbEsc(a.nom) + '</b><small>' + dbEsc(a.secteur || '') + ' · fin de poste ' + dbEsc(a.fin_poste) + '</small></button>').join('');
+    document.querySelectorAll('#entAgents .ent-agent').forEach(b => {
+        b.onclick = () => { entAgent = Number(b.dataset.agent); try { localStorage.setItem(ENT_CLE_AGENT, String(entAgent)); } catch (e) {} entRendre_(); };
+    });
+
+    let h = '';
+    if (!entAgent) h += '<div class="ent-aide">👆 Choisissez d\'abord qui vous êtes : vos tâches s\'affichent en premier.</div>';
+    const urg = r.urgences || [];
+    if (urg.length) h += '<div class="ent-titre">Urgences (' + urg.length + ')</div><div class="ent-liste">' + urg.map(entLigneUrgence_).join('') + '</div>';
+
+    const taches = (r.taches || []).slice().sort(entTrier_);
+    const miennes = entAgent ? taches.filter(t => t.agent === entAgent) : taches;
+    const autres = entAgent ? taches.filter(t => t.agent !== entAgent) : [];
+    const reste = l => l.filter(t => ENT_RANG[entStatut_(t)] < 3).length;
+    h += '<div class="ent-titre">' + (entAgent ? 'Mes tâches' : 'Toutes les tâches') + ' · ' + reste(miennes) + ' à faire</div>';
+    h += '<div class="ent-liste">' + (miennes.length ? miennes.map(t => entLigne_(t, true)).join('') : '<div class="ent-vide">Aucune tâche ouverte.</div>') + '</div>';
+    if (autres.length) {
+        const nomAutre = Array.from(new Set(autres.map(t => entNomAgent_(t.agent)))).join(', ');
+        h += '<div class="ent-titre">Tâches de ' + dbEsc(nomAutre) + ' · ' + reste(autres) + ' à faire'
+            + '<button type="button" id="entBasculeAutres">' + (entAutresOuvertes ? 'Masquer' : 'Afficher') + '</button></div>';
+        if (entAutresOuvertes) h += '<div class="ent-liste">' + autres.map(t => entLigne_(t, true)).join('') + '</div>';
+    }
+    const box = document.getElementById('entTaches');
+    box.innerHTML = h;
+    const bascule = document.getElementById('entBasculeAutres');
+    if (bascule) bascule.onclick = () => { entAutresOuvertes = !entAutresOuvertes; entRendre_(); };
+    box.querySelectorAll('[data-a]').forEach(b => { b.onclick = () => entAction_(b.dataset.a, b.dataset.t, b.dataset.o); });
+}
+
+function entAction_(action, tache, occ) {
+    if (entEnvoi) return;
+    if (!entAgent) { showError('Choisissez d\'abord votre nom en haut de l\'écran.'); return; }
+    const fn = { debut: 'entDebuter', fin: 'entTerminer', annuler: 'entAnnuler' }[action];
+    if (!fn) return;
+    const urgence = tache.indexOf('rem:') === 0;
+    const avant = urgence ? (entDonnees.urgences || []).find(u => u.tache === tache) : null;
+    entEnvoi++;
+    showLoading();
+    const run = google.script.run
+        .withSuccessHandler(r => {
+            hideLoading(); entEnvoi--;
+            if (!r || !r.success) {
+                showError(dbEsc((r && r.error) || 'Enregistrement impossible.'));
+                if (r && r.tableau) entAppliquer_(r.tableau, true);
+                return;
+            }
+            entAppliquer_(r, true);
+            if (action === 'fin') showInfo('✅ Tâche terminée.');
+            if (action === 'fin' && urgence) entTraiterUrgence_(occ, avant);
+        })
+        .withFailureHandler(err => { hideLoading(); entEnvoi--; showError('Connexion impossible : ' + dbEsc(err.message)); });
+    if (action === 'annuler') run[fn](tache, occ); else run[fn](tache, occ, entAgent);
+}
+
+// Fin d'une urgence : la remontée « Chambre » passe en « traitée » (Apps Script : archive, push « traitée »)
+function entTraiterUrgence_(id, u) {
+    const duree = u && u.debut ? Math.round((Date.now() - new Date(u.debut).getTime()) / 60000) : null;
+    const commentaire = 'Traité par ' + entNomAgent_(entAgent) + ' (entretien' + (duree !== null ? ', ' + entDuree_(duree) : '') + ')';
+    google.script.run
+        .withSuccessHandler(r => {
+            if (!r || !r.success) { showError('Tâche terminée, mais la remontée n\'a pas pu passer en « traitée » : ' + dbEsc((r && r.error) || '') + '. Cochez-la dans Remontées.'); return; }
+            if (typeof rafraichirRemontees === 'function') rafraichirRemontees();
+        })
+        .withFailureHandler(err => showError('Tâche terminée, mais la remontée n\'a pas pu passer en « traitée » (' + dbEsc(err.message) + '). Cochez-la dans Remontées.'))
+        .traiterRemonteeEntretien(id, commentaire, pushToken);
+}
+
+// ----- Écran « Suivi » -----
+const ENT_PERIODES = [['jour', 'Aujourd\'hui'], ['semaine', 'Cette semaine'], ['semaine_prec', 'Semaine dernière'], ['mois', 'Ce mois'], ['mois_prec', 'Mois dernier']];
+const ENT_FILTRES = [['tous', 'Tout'], ['retard', 'En retard'], ['en_cours', 'En cours'], ['a_faire', 'À faire'], ['fait', 'Faites']];
+function entIso_(d) { return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+function entBornes_(p) {
+    const j = new Date(); j.setHours(12, 0, 0, 0);
+    const lundi = new Date(j); lundi.setDate(j.getDate() - ((j.getDay() + 6) % 7));
+    if (p === 'jour') return [j, j];
+    if (p === 'semaine' || p === 'semaine_prec') {
+        const du = new Date(lundi); if (p === 'semaine_prec') du.setDate(du.getDate() - 7);
+        const au = new Date(du); au.setDate(du.getDate() + 6);
+        return [du, au];
+    }
+    const du = new Date(j.getFullYear(), j.getMonth() - (p === 'mois_prec' ? 1 : 0), 1, 12);
+    return [du, new Date(du.getFullYear(), du.getMonth() + 1, 0, 12)];
+}
+function entChips_(id, liste, actif, clic) {
+    const box = document.getElementById(id);
+    box.innerHTML = liste.map(x => '<button type="button" class="ent-chip' + (String(x[0]) === String(actif) ? ' on' : '') + '" data-v="' + dbEsc(x[0]) + '">' + dbEsc(x[1]) + '</button>').join('');
+    box.querySelectorAll('.ent-chip').forEach(b => { b.onclick = () => clic(b.dataset.v); });
+}
+
+function entChargerSuivi(silencieux) {
+    const b = entBornes_(entSuiviPeriode);
+    if (!silencieux) showLoading();
+    google.script.run
+        .withSuccessHandler(r => {
+            if (!silencieux) hideLoading();
+            if (!r || !r.success) { if (!silencieux) showError(dbEsc((r && r.error) || 'Suivi indisponible.')); return; }
+            entSuiviDonnees = r;
+            entRendreSuivi_();
+            syMemoriser('formEntretien');
+        })
+        .withFailureHandler(err => { if (!silencieux) { hideLoading(); showError('Connexion impossible : ' + dbEsc(err.message)); } })
+        .entSuivi(entIso_(b[0]), entIso_(b[1]));
+}
+
+function entRendreSuivi_() {
+    const r = entSuiviDonnees;
+    if (!r) return;
+    const agents = r.agents || [];
+    entChips_('entSuiviPeriodes', ENT_PERIODES, entSuiviPeriode, v => { entSuiviPeriode = v; entChargerSuivi(false); });
+    entChips_('entSuiviAgents', [[0, 'Tous les agents']].concat(agents.map(a => [a.num, a.nom])), entSuiviAgent, v => { entSuiviAgent = Number(v); entRendreSuivi_(); });
+    entChips_('entSuiviStatuts', ENT_FILTRES, entSuiviStatut, v => { entSuiviStatut = v; entRendreSuivi_(); });
+
+    const taches = (r.taches || []).filter(t => !entSuiviAgent || t.agent === entSuiviAgent);
+    const urg = (r.urgences || []).filter(u => !entSuiviAgent || u.fait_par === entSuiviAgent);
+    const n = { total: taches.length, fait: 0, en_cours: 0, retard: 0, a_faire: 0 };
+    taches.forEach(t => {
+        const s = entStatut_(t);
+        if (s === 'fait' || s === 'fait_retard') n.fait++; else n[s]++;
+    });
+    const taux = n.total ? Math.round(n.fait * 100 / n.total) : 0;
+    document.getElementById('entSuiviKpis').innerHTML =
+        '<div class="ent-kpi"><span>Faites</span><b>' + n.fait + ' / ' + n.total + '</b> <span>' + taux + ' %</span></div>'
+        + '<div class="ent-kpi"><span>En cours</span><b>' + n.en_cours + '</b></div>'
+        + '<div class="ent-kpi rouge"><span>En retard</span><b>' + n.retard + '</b></div>'
+        + '<div class="ent-kpi"><span>Urgences traitées</span><b>' + urg.filter(u => u.fin).length + '</b></div>';
+
+    // Temps passé par agent (qui a commencé la tâche), urgences comprises
+    const temps = {};
+    taches.concat(urg).forEach(t => { if (t.fin && t.fait_par) temps[t.fait_par] = (temps[t.fait_par] || 0) + (Number(t.duree_min) || 0); });
+    const lignesTemps = agents.filter(a => temps[a.num] !== undefined).map(a => dbEsc(a.nom) + ' : ' + entDuree_(temps[a.num]));
+    document.getElementById('entSuiviTemps').innerHTML = '⏱ Temps passé (horodatage) : ' + (lignesTemps.length ? lignesTemps.join(' · ') : 'aucune tâche terminée');
+
+    const garder = t => {
+        const s = entStatut_(t);
+        if (entSuiviStatut === 'tous') return true;
+        if (entSuiviStatut === 'fait') return s === 'fait' || s === 'fait_retard';
+        return s === entSuiviStatut;
+    };
+    const liste = taches.filter(garder).sort(entTrier_);
+    let h = '<div class="ent-liste">' + (liste.length ? liste.map(t => entLigne_(t, false, agents).replace('</div><div class="ent-meta">',
+        '</div><div class="ent-meta">' + dbEsc(entNomAgent_(t.agent, agents)) + ' · ')).join('') : '<div class="ent-vide">Aucune tâche pour ce filtre.</div>') + '</div>';
+    if (urg.length && (entSuiviStatut === 'tous' || entSuiviStatut === 'fait' || entSuiviStatut === 'en_cours')) {
+        const lu = urg.filter(u => entSuiviStatut === 'tous' || (entSuiviStatut === 'fait' ? !!u.fin : !u.fin));
+        if (lu.length) h += '<div class="ent-titre">Urgences</div><div class="ent-liste">' + lu.map(u =>
+            '<div class="ent-row urg s-' + u.statut + '"><div class="ent-txt"><div class="ent-lib">🚨 ' + dbEsc(u.libelle) + '</div>'
+            + '<div class="ent-exec">' + entExec_(u, agents) + '</div></div></div>').join('') + '</div>';
+    }
+    document.getElementById('entSuiviListe').innerHTML = h;
+}
+
+// ----- Modification des agents (nom, secteur, fin de poste) : mot de passe admin -----
+function entEditionAgents(ouvrir) {
+    const box = document.getElementById('entAgentsEdition');
+    const agents = (entSuiviDonnees && entSuiviDonnees.agents) || (entDonnees && entDonnees.agents) || [];
+    if (!ouvrir || !agents.length) { box.style.display = 'none'; box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="ent-liste" style="padding:12px 14px;gap:12px">'
+        + agents.map(a => '<div class="ent-ed" data-num="' + a.num + '" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">'
+            + '<b style="min-width:70px">Agent ' + a.num + '</b>'
+            + '<input type="text" data-c="nom" maxlength="60" placeholder="Nom" value="' + dbEsc(a.nom) + '" style="flex:1 1 160px;min-height:48px;font-size:16px;padding:0 10px;border:2px solid var(--line);border-radius:10px;font-family:inherit">'
+            + '<input type="text" data-c="secteur" maxlength="60" placeholder="Secteur" value="' + dbEsc(a.secteur) + '" style="flex:1 1 160px;min-height:48px;font-size:16px;padding:0 10px;border:2px solid var(--line);border-radius:10px;font-family:inherit">'
+            + '<label style="font-size:14px">Fin de poste <input type="time" data-c="fin_poste" value="' + dbEsc(a.fin_poste) + '" style="min-height:48px;font-size:16px;border:2px solid var(--line);border-radius:10px;font-family:inherit"></label>'
+            + '</div>').join('')
+        + '<div style="display:flex;flex-wrap:wrap;gap:8px;align-items:center">'
+        + '<input type="password" id="entMdpAgents" placeholder="Mot de passe admin" autocomplete="off" style="flex:1 1 200px;min-height:48px;font-size:16px;padding:0 10px;border:2px solid var(--line);border-radius:10px;font-family:inherit">'
+        + '<button type="button" class="ent-btn debut" onclick="entEnregistrerAgents()">Enregistrer</button>'
+        + '<button type="button" class="ent-btn annuler" onclick="entEditionAgents(false)">Fermer</button></div></div>';
+    box.style.display = '';
+}
+function entEnregistrerAgents() {
+    const agents = Array.from(document.querySelectorAll('#entAgentsEdition .ent-ed')).map(l => ({
+        num: Number(l.dataset.num),
+        nom: l.querySelector('[data-c="nom"]').value.trim(),
+        secteur: l.querySelector('[data-c="secteur"]').value.trim(),
+        fin_poste: l.querySelector('[data-c="fin_poste"]').value
+    }));
+    if (agents.some(a => !a.nom)) { showError('Chaque agent doit avoir un nom.'); return; }
+    const mdp = document.getElementById('entMdpAgents').value;
+    if (!mdp) { showError('Saisissez le mot de passe admin.'); return; }
+    showLoading();
+    google.script.run
+        .withSuccessHandler(r => {
+            hideLoading();
+            if (!r || !r.success) { showError(dbEsc((r && r.error) || 'Enregistrement impossible.')); return; }
+            showInfo('✅ Agents mis à jour. Les échéances suivent les nouvelles fins de poste.');
+            entEditionAgents(false);
+            entChargerSuivi(true);
+            entDonnees = null;
+        })
+        .withFailureHandler(err => { hideLoading(); showError('Connexion impossible : ' + dbEsc(err.message)); })
+        .modifierAgentsEntretien(mdp, agents);
+}
+
+// Passage à « en retard » à l'heure dite, sans attendre un changement
+setInterval(() => {
+    const sec = document.getElementById('formEntretien');
+    if (!sec || !sec.classList.contains('active') || entEnvoi) return;
+    if (entVue === 'taches') entRendre_(); else entRendreSuivi_();
+}, 60000);
+
 // ===== NAVIGATION =====
 const FORM_TO_BLOC = {
     form1: 'menuExploit', form3: 'menuExploit', formNettoyage: 'menuExploit', formGares: 'menuExploit', formBennes: 'menuExploit',
@@ -7859,6 +8289,7 @@ function showForm(formId) {
     if (formId === 'formAnomalie') renderAnomalieTable();
     if (formId === 'formTransfertPicking') resetTransfertPickingTable();
     if (formId === 'formColisFragiles') cfOuvrir();
+    if (formId === 'formEntretien') entOuvrir(); // [ENTRETIEN]
     if (formId === 'formNettoyage') { nettoyageDate = new Date(); nettoyageEquipe = 'matin'; renderNettoyage(true); }
     if (formId === 'formEngins') { invalidateCache(7); renderEnginsForm(); }
     if (formId === 'form4') { invalidateCache(4); renderFilmeuseTable(); }
@@ -11158,7 +11589,10 @@ const NOTIF_BLOCS = [
     { id: 'borne', titre: 'Locaux (borne)',    detail: 'Salle de pause, chambre, toilettes, vestiaire, autre',
       modules: ['pause', 'chambre', 'toilettes', 'vestiaire', 'divers'] },
     { id: 'suivi', titre: 'Suivi',             detail: 'Remontée traitée, demandes de vêtements',
-      evenements: ['traitee', 'vetements'] }
+      evenements: ['traitee', 'vetements'] },
+    // [ENTRETIEN] appareils des agents d'entretien (Push.gs → prefs.entretien, Entretien.gs → rappels)
+    { id: 'entretien', titre: 'Entretien',     detail: 'Rappels et retards des tâches, urgences chambre (plaque de glace)',
+      evenements: ['entretien'] }
 ];
 
 (function construireNotifBlocs() {
@@ -11186,7 +11620,8 @@ function prefsPushSaisies() {
         toutes: document.getElementById('notifTout').checked,
         modules: blocs.reduce((acc, b) => acc.concat(b.modules || []), []),
         traitee: suivi,
-        vetements: suivi
+        vetements: suivi,
+        entretien: blocs.some(b => b.id === 'entretien') // [ENTRETIEN]
     };
 }
 
@@ -11245,7 +11680,7 @@ function fermerNotifs() { document.getElementById('notifModal').classList.remove
 
 function validerNotifs() {
     const prefs = prefsPushSaisies();
-    const aucune = !prefs.toutes && !prefs.modules.length && !prefs.traitee && !prefs.vetements;
+    const aucune = !prefs.toutes && !prefs.modules.length && !prefs.traitee && !prefs.vetements && !prefs.entretien;
     if (pushEtatCourant && pushEtatCourant.etat === 'granted' && pushToken) { enregistrerPrefsPush(); return; }
     if (aucune) { fermerNotifs(); return; }
     pushAttenteActivation = true;
@@ -11317,6 +11752,7 @@ function rafraichirRemontees() {
             if (activeId === 'form6' && !saisieEnCours('#imprimanteTableBody tr')) renderImprimanteTable();
             if (activeId === 'formEngins' && !saisieEnCours('#enginsAccordion tbody tr')) renderEnginsForm();
             if (activeId === 'form8' && !saisieEnCours('#porteTableBody tr')) renderPorteTable();
+            if (activeId === 'formEntretien' && !entEnvoi) entRecharger_(); // [ENTRETIEN] urgences « Chambre »
         })
         .finally(function() { pollingEnCours = false; });
 }
@@ -11360,7 +11796,8 @@ const SY_ECRANS = {
     formQhseSuivi:     { modules: ['qhse'],       relire: () => qhseCharger(true),
                          modifie: () => Array.from(document.querySelectorAll('#qhseListe textarea[data-id]')).some(t => t.value !== t.defaultValue) },
     formColisFragiles: { modules: ['colis'],      relire: () => cfRecharger_(), tableau: '#cfBody',
-                         message: 'L\'enregistrement sera refusé pour ne rien écraser : notez vos changements, rechargez, puis ressaisissez-les.' }
+                         message: 'L\'enregistrement sera refusé pour ne rien écraser : notez vos changements, rechargez, puis ressaisissez-les.' },
+    formEntretien:     { modules: ['entretien'],  relire: () => entRecharger_(), occupe: () => entEnvoi > 0 } // [ENTRETIEN]
 };
 let syVu = null;              // dernières heures de modification connues { module: version }
 let syAttente = null;         // id de l'écran à relire dès que possible
